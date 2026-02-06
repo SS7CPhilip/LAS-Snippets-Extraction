@@ -1,0 +1,26 @@
+# --- Python ---
+    __pycache__/
+    *.pyc
+    *.pyo
+    *.pyd
+    
+    # --- ArcGIS Pro ---
+    *.lock
+    *.gdb/
+    *.stylx
+    *.aprx
+    *.atbx
+    # Scratch folders often created by ArcGIS
+    scratch/
+    scratch.gdb/
+    
+    # --- LiDAR Data (Crucial) ---
+    *.las
+    *.laz
+    *.copc.laz
+    
+    # --- IDE & OS ---
+    .vscode/
+    .idea/
+    .DS_Store
+    Thumbs.db
