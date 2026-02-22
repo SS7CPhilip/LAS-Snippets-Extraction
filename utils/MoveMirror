@@ -1,0 +1,64 @@
+<#
+.SYNOPSIS
+Moves files from a source to a destination folder based on a list of base names.
+#>
+
+param(
+    [string]$src  = "C:\Path\To\Source",
+    [string]$dest = "C:\Path\To\Destination",
+    [string]$list = "C:\Path\To\FileList.txt"
+)
+
+# Optional: limit to specific extensions (uncomment to use)
+# $allowedExts = @('.las', '.laz', '.zlas')  # add/remove as needed
+
+# === Create destination if it doesn't exist ===
+if (-not (Test-Path -LiteralPath $dest)) {
+    New-Item -ItemType Directory -Path $dest | Out-Null
+}
+
+# === Read and normalize names (base names only) ===
+$names = Get-Content -LiteralPath $list |
+    Where-Object { $_ -and $_.Trim() -ne '' } |
+    ForEach-Object { $_.Trim() }
+
+Write-Host "Loaded $($names.Count) names from list."
+
+# === Move matching files from source to destination ===
+$files = Get-ChildItem -LiteralPath $src -File  # use -Recurse if files may be in subfolders
+
+$movedCount = 0
+$missing    = @()
+
+foreach ($name in $names) {
+    # Find files whose BaseName equals the list entry (case-insensitive by default)
+    $matches = $files | Where-Object { $_.BaseName -eq $name }
+
+    # If you want to enforce allowed extensions, uncomment next line:
+    # $matches = $matches | Where-Object { $allowedExts -contains $_.Extension.ToLower() }
+
+    if ($matches -and $matches.Count -gt 0) {
+        foreach ($m in $matches) {
+            try {
+                Move-Item -LiteralPath $m.FullName -Destination $dest -Force
+                Write-Host ("Moved: {0}" -f $m.Name)
+                $movedCount++
+            }
+            catch {
+                Write-Warning ("Failed to move: {0} ({1})" -f $m.FullName, $_.Exception.Message)
+            }
+        }
+    } else {
+        $missing += $name
+    }
+}
+
+Write-Host ("Total moved: {0}" -f $movedCount)
+
+if ($missing.Count -gt 0) {
+    Write-Warning ("No file found for {0} base name(s):" -f $missing.Count)
+    $missing | ForEach-Object { Write-Host "  - $_" }
+}
+
+# === Optional: write a log to a file ===
+# "Moved $movedCount files on $(Get-Date)" | Set-Content -Path (Join-Path $dest "move_log.txt")
