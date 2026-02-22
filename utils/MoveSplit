@@ -1,0 +1,104 @@
+<#
+.SYNOPSIS
+Moves Split_* derivatives based on a list of original filenames.
+#>
+
+param(
+    [string]$SourceFolder      = "C:\Path\To\Source",
+    [string]$TargetFolder      = "C:\Path\To\Destination\Mirror",
+    [string]$OriginalsListPath = "C:\Path\To\FileList.txt",
+    [bool]$Recurse             = $false,
+    [bool]$DryRun              = $false,
+    [string]$LogCsv            = "C:\Path\To\moved_split_derivatives.csv"
+)
+
+# Ensure target exists
+New-Item -ItemType Directory -Path $TargetFolder -Force | Out-Null
+
+# Helper: extract "stem" (filename without extension) – trims spaces
+function Get-Stem([string]$name) {
+    return [IO.Path]::GetFileNameWithoutExtension($name.Trim())
+}
+
+# Load stems into a fast lookup (HashSet) – unique
+$stemSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+Get-Content -LiteralPath $OriginalsListPath | ForEach-Object {
+    $null = $stemSet.Add( (Get-Stem $_) )
+}
+
+# Pattern pieces:
+# - Starts with "Split_"
+# - Exact stem immediately after (escaped for safety)
+# - An underscore, then 0–9 as the second digit (i.e., _00.._09), then a dot and any extension
+# Example full name: Split_211021_123654 - originalpoints_04.las
+function Make-RegexForStem([string]$stem) {
+    $escaped = [Regex]::Escape($stem)
+    return "^Split_${escaped}_0[0-9]\..+$"
+}
+
+# Gather candidate files
+$gciParams = @{ Path = $SourceFolder; File = $true }
+if ($Recurse) { $gciParams.Recurse = $true }
+
+$files = Get-ChildItem @gciParams
+
+# Optional: build a map of stem -> regex for speed
+$regexMap = @{}
+foreach ($stem in $stemSet) {
+    $regexMap[$stem] = (Make-RegexForStem $stem)
+}
+
+# Prepare logging
+$log = New-Object System.Collections.Generic.List[Object]
+
+$moveCount = 0
+foreach ($f in $files) {
+    # Only consider names that start with Split_ and contain "_0"
+    if ($f.Name -notlike 'Split_*_0*') { continue }
+
+    # Quick check: find a stem whose pattern matches this file
+    $matched = $false
+    foreach ($kv in $regexMap.GetEnumerator()) {
+        if ($f.Name -match $kv.Value) {
+            $matched = $true
+            break
+        }
+    }
+    if (-not $matched) { continue }
+
+    # Destination path (flat into target, preserving name)
+    $destPath = Join-Path $TargetFolder $f.Name
+
+    # Log entry
+    $log.Add([PSCustomObject]@{
+        Time        = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+        Action      = $(if ($DryRun) { "WouldMove" } else { "Move" })
+        SourcePath  = $f.FullName
+        Destination = $destPath
+        SizeBytes   = $f.Length
+    })
+
+    # Move or WhatIf
+    if ($DryRun) {
+        Move-Item -LiteralPath $f.FullName -Destination $destPath -Force -WhatIf
+    } else {
+        Move-Item -LiteralPath $f.FullName -Destination $destPath -Force
+    }
+
+    $moveCount++
+}
+
+# Write CSV log if requested
+if ($LogCsv) {
+    $log | Export-Csv -NoTypeInformation -Path $LogCsv -Encoding UTF8
+}
+
+Write-Host ""
+if ($DryRun) {
+    Write-Host "Dry run complete. $moveCount files matched and WOULD be moved."
+    Write-Host "Review the on-screen -WhatIf output and '$LogCsv' (if set)."
+    Write-Host "Run without the -DryRun flag to perform the move."
+} else {
+    Write-Host "Done. $moveCount files moved to: $TargetFolder"
+    if ($LogCsv) { Write-Host "Log written to: $LogCsv" }
+}
